@@ -93,7 +93,7 @@ builder.Services.AddScoped<IMongoDatabase>(sp =>
 builder.Services.AddSingleton<MongoService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 
-// 🔥 5. CORS SOLO PARA TU FRONTEND (PRODUCCIÓN)
+//  5. CORS SOLO PARA TU FRONTEND (PRODUCCIÓN)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -114,8 +114,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// 🔥 ENDPOINT PARA PROBAR QUE VIVE
-app.MapGet("/", () => "API funcionando 💅");
+//  ENDPOINT PARA PROBAR QUE VIVE
+app.MapGet("/", () => "API funcionando ");
 
 // 🔥 ORDEN IMPORTANTE
 app.UseCors("AllowFrontend");
