@@ -117,7 +117,7 @@ if (app.Environment.IsDevelopment())
 //  ENDPOINT PARA PROBAR QUE VIVE
 app.MapGet("/", () => "API funcionando ");
 
-// 🔥 ORDEN IMPORTANTE
+//  ORDEN IMPORTANTE
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
