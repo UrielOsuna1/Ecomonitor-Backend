@@ -16,11 +16,24 @@ namespace backend_iot.Services
         public User? Login(string email, string password)
         {
             var user = _users.Find(u => u.Email == email).FirstOrDefault();
-            
-            if (user != null && BC.Verify(password, user.Password))
+
+            if (user == null || string.IsNullOrWhiteSpace(user.Password))
             {
-                return user;
+                return null;
             }
+
+            try
+            {
+                if (BC.Verify(password, user.Password))
+                {
+                    return user;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+
             return null;
         }
 

@@ -1,6 +1,6 @@
 using backend_iot.Services;
 using backend_iot.Models;
-using backend_iot; 
+using backend_iot;
 using Microsoft.OpenApi.Models;
 using MongoDB.Driver;
 using System.Text.Json;
@@ -10,18 +10,40 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+static string? FirstNonEmpty(params string?[] values) =>
+    values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
 // 🔥 PUERTO DINÁMICO PARA RAILWAY
 var port = Environment.GetEnvironmentVariable("PORT") ?? "5126";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
 // --- 1. CONFIGURACIÓN DE SEGURIDAD (JWT) ---
-var jwtKey = Environment.GetEnvironmentVariable("JWT_KEY") ?? builder.Configuration["Jwt:Key"];
+var jwtKey = FirstNonEmpty(
+    Environment.GetEnvironmentVariable("JWT_KEY"),
+    builder.Configuration["Jwt:Key"]);
 if (string.IsNullOrEmpty(jwtKey) || jwtKey.Length < 32)
 {
     throw new Exception("Seguridad Crítica: La JWT_KEY no está configurada o es muy corta.");
 }
 
 var key = Encoding.ASCII.GetBytes(jwtKey);
+var mongoConnectionString = FirstNonEmpty(
+    Environment.GetEnvironmentVariable("MONGODB_URI"),
+    Environment.GetEnvironmentVariable("MONGO_URL"),
+    Environment.GetEnvironmentVariable("MONGO_PUBLIC_URL"),
+    Environment.GetEnvironmentVariable("MONGO_PRIVATE_URL"),
+    Environment.GetEnvironmentVariable("DATABASE_URL"),
+    builder.Configuration["MongoDbSettings:ConnectionString"]);
+var mongoDatabaseName = FirstNonEmpty(
+    Environment.GetEnvironmentVariable("MONGODB_DATABASE"),
+    Environment.GetEnvironmentVariable("MONGO_DATABASE"),
+    Environment.GetEnvironmentVariable("MONGODATABASE"),
+    builder.Configuration["MongoDbSettings:DatabaseName"])
+    ?? "EcoMonitor";
+var frontendUrl = FirstNonEmpty(
+    Environment.GetEnvironmentVariable("FRONTEND_URL"),
+    builder.Configuration["FrontendUrl"])
+    ?? "https://ecomonitor-fronend-production.up.railway.app";
 
 builder.Services.AddAuthentication(x =>
 {
@@ -77,17 +99,20 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 // --- 4. MONGODB ---
-builder.Services.Configure<MongoDbSettings>(builder.Configuration.GetSection("MongoDbSettings"));
-var mongoSettings = builder.Configuration.GetSection("MongoDbSettings");
+builder.Services.Configure<MongoDbSettings>(options =>
+{
+    options.ConnectionString = mongoConnectionString ?? string.Empty;
+    options.DatabaseName = mongoDatabaseName;
+});
 
 builder.Services.AddSingleton<IMongoClient>(sp =>
-    new MongoClient(mongoSettings["ConnectionString"])
+    new MongoClient(mongoConnectionString)
 );
 
 builder.Services.AddScoped<IMongoDatabase>(sp =>
 {
     var client = sp.GetRequiredService<IMongoClient>();
-    return client.GetDatabase(mongoSettings["DatabaseName"]);
+    return client.GetDatabase(mongoDatabaseName);
 });
 
 builder.Services.AddSingleton<MongoService>();
@@ -99,7 +124,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowFrontend", policy =>
     {
         policy
-            .WithOrigins("https://ecomonitor-fronend-production.up.railway.app")
+            .WithOrigins(frontendUrl)
             .AllowAnyHeader()
             .AllowAnyMethod();
     });

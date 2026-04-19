@@ -14,74 +14,111 @@ namespace backend_iot.Controllers
     {
         private readonly IAuthService _authService;
         private readonly IConfiguration _config;
-        private readonly MongoService _mongoService; // Inyectamos MongoService para los logs
+        private readonly MongoService _mongoService;
+        private readonly ILogger<AuthController> _logger;
 
-        public AuthController(IAuthService authService, IConfiguration config, MongoService mongoService)
+        public AuthController(
+            IAuthService authService,
+            IConfiguration config,
+            MongoService mongoService,
+            ILogger<AuthController> logger)
         {
             _authService = authService;
             _config = config;
             _mongoService = mongoService;
+            _logger = logger;
         }
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginDto request)
         {
-            var user = _authService.Login(request.Email, request.Password);
-            
-            if (user == null) {
-                // OWASP A09:2021 - Registro de intento fallido
-                await _mongoService.RegistrarLogAsync(null, "LOGIN_FAILED", $"Intento de acceso fallido para: {request.Email}");
-                return Unauthorized(new { message = "Credenciales inválidas" });
-            }
-
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var jwtKey = Environment.GetEnvironmentVariable("JWT_KEY") ?? _config["Jwt:Key"];
-            var key = Encoding.ASCII.GetBytes(jwtKey); 
-            
-            string userRole = user.Rol?.Equals("admin", StringComparison.OrdinalIgnoreCase) == true 
-                              ? "Admin" 
-                              : (user.Rol ?? "user");
-
-            var tokenDescriptor = new SecurityTokenDescriptor
+            try
             {
-                Subject = new ClaimsIdentity(new[] { 
-                    new Claim(ClaimTypes.NameIdentifier, user.Id ?? ""), 
-                    new Claim(ClaimTypes.Name, user.Nombre ?? ""),
-                    new Claim(ClaimTypes.Email, user.Email ?? ""),
-                    new Claim(ClaimTypes.Role, userRole) 
-                }),
-                Expires = DateTime.UtcNow.AddHours(2),
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
-            };
+                if (request == null || string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+                {
+                    return BadRequest(new { message = "Email y contraseña son obligatorios" });
+                }
 
-            var token = tokenHandler.CreateToken(tokenDescriptor);
-            
-            // Registro de éxito
-            await _mongoService.RegistrarLogAsync(user.Id, "LOGIN_SUCCESS", $"Sesión iniciada por el usuario: {user.Email}");
+                var user = _authService.Login(request.Email, request.Password);
 
-            return Ok(new { 
-                id = user.Id, 
-                nombre = user.Nombre,
-                rol = user.Rol,
-                token = tokenHandler.WriteToken(token) 
-            });
+                if (user == null)
+                {
+                    await SafeRegisterLogAsync(null, "LOGIN_FAILED", $"Intento de acceso fallido para: {request.Email}");
+                    return Unauthorized(new { message = "Credenciales inválidas" });
+                }
+
+                var tokenHandler = new JwtSecurityTokenHandler();
+                var jwtKey = Environment.GetEnvironmentVariable("JWT_KEY") ?? _config["Jwt:Key"];
+                var key = Encoding.ASCII.GetBytes(jwtKey);
+
+                string userRole = user.Rol?.Equals("admin", StringComparison.OrdinalIgnoreCase) == true
+                                  ? "Admin"
+                                  : (user.Rol ?? "user");
+
+                var tokenDescriptor = new SecurityTokenDescriptor
+                {
+                    Subject = new ClaimsIdentity(new[] {
+                        new Claim(ClaimTypes.NameIdentifier, user.Id ?? ""),
+                        new Claim(ClaimTypes.Name, user.Nombre ?? ""),
+                        new Claim(ClaimTypes.Email, user.Email ?? ""),
+                        new Claim(ClaimTypes.Role, userRole)
+                    }),
+                    Expires = DateTime.UtcNow.AddHours(2),
+                    SigningCredentials = new SigningCredentials(
+                        new SymmetricSecurityKey(key),
+                        SecurityAlgorithms.HmacSha256Signature)
+                };
+
+                var token = tokenHandler.CreateToken(tokenDescriptor);
+
+                await SafeRegisterLogAsync(user.Id, "LOGIN_SUCCESS", $"Sesión iniciada por el usuario: {user.Email}");
+
+                return Ok(new
+                {
+                    id = user.Id,
+                    nombre = user.Nombre,
+                    rol = user.Rol,
+                    token = tokenHandler.WriteToken(token)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error inesperado durante el login para {Email}", request?.Email);
+                return StatusCode(500, new { message = "Error interno al iniciar sesión" });
+            }
         }
 
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] User user)
         {
-            try {
+            try
+            {
                 await _authService.Register(user);
-                await _mongoService.RegistrarLogAsync(null, "USER_REGISTER", $"Nuevo usuario registrado: {user.Email}");
+                await SafeRegisterLogAsync(null, "USER_REGISTER", $"Nuevo usuario registrado: {user.Email}");
                 return Ok(new { message = "Registro exitoso" });
             }
-            catch (System.Exception ex) {
+            catch (Exception ex)
+            {
                 return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        private async Task SafeRegisterLogAsync(string? userId, string accion, string detalle)
+        {
+            try
+            {
+                var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                await _mongoService.RegistrarLogAsync(userId, accion, detalle, ip);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "No se pudo registrar el log {Accion}", accion);
             }
         }
     }
 
-    public class LoginDto {
+    public class LoginDto
+    {
         public string Email { get; set; } = string.Empty;
         public string Password { get; set; } = string.Empty;
     }
