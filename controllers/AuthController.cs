@@ -5,6 +5,7 @@ using System.Security.Claims;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.IdentityModel.Tokens.Jwt;
+using MongoDB.Driver;
 
 namespace backend_iot.Controllers
 {
@@ -81,6 +82,15 @@ namespace backend_iot.Controllers
                     token = tokenHandler.WriteToken(token)
                 });
             }
+            catch (Exception ex) when (IsMongoUnavailable(ex))
+            {
+                _logger.LogError(ex, "MongoDB no disponible durante el login para {Email}", request?.Email);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    message = "Servicio de autenticación temporalmente no disponible",
+                    code = "database_unavailable"
+                });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error inesperado durante el login para {Email}", request?.Email);
@@ -96,6 +106,15 @@ namespace backend_iot.Controllers
                 await _authService.Register(user);
                 await SafeRegisterLogAsync(null, "USER_REGISTER", $"Nuevo usuario registrado: {user.Email}");
                 return Ok(new { message = "Registro exitoso" });
+            }
+            catch (Exception ex) when (IsMongoUnavailable(ex))
+            {
+                _logger.LogError(ex, "MongoDB no disponible durante el registro para {Email}", user?.Email);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    message = "Servicio de registro temporalmente no disponible",
+                    code = "database_unavailable"
+                });
             }
             catch (Exception ex)
             {
@@ -114,6 +133,14 @@ namespace backend_iot.Controllers
             {
                 _logger.LogWarning(ex, "No se pudo registrar el log {Accion}", accion);
             }
+        }
+
+        private static bool IsMongoUnavailable(Exception ex)
+        {
+            return ex is MongoConnectionException
+                || ex is TimeoutException
+                || ex is MongoAuthenticationException
+                || ex.InnerException is not null && IsMongoUnavailable(ex.InnerException);
         }
     }
 
